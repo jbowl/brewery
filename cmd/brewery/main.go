@@ -1,65 +1,76 @@
-//https://gist.github.com/fntlnz/cf14feb5a46b2eda428e000157447309  create CA cert
-
-//export GO_PATH=~/go
-//export PATH=$PATH:/$GO_PATH/bin
-//protoc --go_out=. --go-grpc_out=. service.proto
-// protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative api/proto/brewery/brewery.proto
 package main
 
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/jbowl/brewery/internal/pkg/obdb"
 	"io/ioutil"
+	"net"
+	"os"
 
 	"github.com/jbowl/apibrewery"
-
-	"log"
-	"net"
-
+	"github.com/jbowl/brewery/internal/pkg/obdb"
+	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 )
 
 type server struct {
 	apibrewery.UnimplementedBreweryServiceServer
 	obdb obdb.OBDB
-
-
 }
 
-func main() {
-	log.Println("Server running ...")
+func init() {
+	// log as JSON not default ASCII
+	log.SetFormatter(&log.JSONFormatter{})
+	log.SetOutput(os.Stdout)
+	// only log warning severity or above
+	//	log.SetLevel(log.WarnLevel)
 
+	log.Printf("init()")
+}
+
+func run() error {
+	log.Println("run() Server running ...")
+
+	// TODO: use env variable for port
 	lis, err := net.Listen("tcp", ":50051")
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	api := server {
-		obdb: obdb.OBDB{ APIUrl:  "https://api.openbrewerydb.org"},
+	api := server{
+		obdb: obdb.OBDB{APIUrl: "https://api.openbrewerydb.org"},
 	}
+
+	// TODO: use a selfsigned cert
 
 	srv := grpc.NewServer()
 	apibrewery.RegisterBreweryServiceServer(srv, &api)
 
 	log.Fatalln(srv.Serve(lis))
+
+	return nil
 }
 
-type BreweryResults struct {
+func main() {
+	// not of value as a docker container
+	pid := os.Getpid()
+	fmt.Printf("pid for %s = %d\n", os.Args[0], pid)
 
-	BreweryResult [] apibrewery.BreweryResult;
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
 }
 
-
-// ListFeatures lists all features contained within the given bounding Rectangle.
+// SearchBreweries -
 func (s *server) SearchBreweries(filter *apibrewery.Filter, stream apibrewery.BreweryService_SearchBreweriesServer) error {
 
 	APIUrl := s.obdb.APIUrl + "/breweries/search?" + filter.GetBy()
 
-	resp, err := s.obdb.RequestImplResponse("GET", APIUrl)
+	resp, err := s.obdb.RESTReq("GET", APIUrl)
 
 	if err != nil {
-		return  err
+		return err
 	}
 
 	defer resp.Body.Close()
@@ -71,15 +82,11 @@ func (s *server) SearchBreweries(filter *apibrewery.Filter, stream apibrewery.Br
 
 	var b []apibrewery.BreweryResult
 
-
 	if err := json.Unmarshal(contents, &b); err != nil {
 		return err
 	}
 
-	fmt.Printf(string(contents))
-
 	for _, brewery := range b {
-
 		apib := apibrewery.Brewery{Id: brewery.ID, Name: brewery.Name, WebsiteUrl: brewery.Website}
 
 		if err := stream.Send(&apib); err != nil {
@@ -90,18 +97,15 @@ func (s *server) SearchBreweries(filter *apibrewery.Filter, stream apibrewery.Br
 	return nil
 }
 
-
-
-// ListFeatures lists all features contained within the given bounding Rectangle.
+// ListBreweries -
 func (s *server) ListBreweries(filter *apibrewery.Filter, stream apibrewery.BreweryService_ListBreweriesServer) error {
-
 
 	APIUrl := s.obdb.APIUrl + "/breweries?" + filter.GetBy()
 
-	resp, err := s.obdb.RequestImplResponse("GET", APIUrl)
+	resp, err := s.obdb.RESTReq("GET", APIUrl)
 
 	if err != nil {
-		return  err
+		return err
 	}
 
 	defer resp.Body.Close()
@@ -111,8 +115,7 @@ func (s *server) ListBreweries(filter *apibrewery.Filter, stream apibrewery.Brew
 		return err
 	}
 
-    var b []apibrewery.BreweryResult
-
+	var b []apibrewery.BreweryResult
 
 	if err := json.Unmarshal(contents, &b); err != nil {
 		return err
@@ -120,28 +123,27 @@ func (s *server) ListBreweries(filter *apibrewery.Filter, stream apibrewery.Brew
 
 	fmt.Printf(string(contents))
 
-     for _, brewery := range b {
+	for _, brewery := range b {
 
-		 apib := apibrewery.Brewery{
-		 	Id: brewery.ID,
-		 	Name: brewery.Name,
-		 	Street: brewery.Street,
-		 	City: brewery.City,
-		 	State: brewery.State,
-		 	Countryprov: brewery.CountryProvince,
-		 	Postalcode: brewery.PostalCode,
-		 	Country: brewery.Country,
-		 	Longitude: brewery.Longitude,
-		 	Latitude: brewery.Latitude,
-		 	Phone: brewery.Phone,
-		 	WebsiteUrl: brewery.Website,
-		 }
+		apib := apibrewery.Brewery{
+			Id:          brewery.ID,
+			Name:        brewery.Name,
+			Street:      brewery.Street,
+			City:        brewery.City,
+			State:       brewery.State,
+			Countryprov: brewery.CountryProvince,
+			Postalcode:  brewery.PostalCode,
+			Country:     brewery.Country,
+			Longitude:   brewery.Longitude,
+			Latitude:    brewery.Latitude,
+			Phone:       brewery.Phone,
+			WebsiteUrl:  brewery.Website,
+		}
 
-		 			if err := stream.Send(&apib); err != nil {
-		 				return err
-		 			}
-	 }
+		if err := stream.Send(&apib); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
-

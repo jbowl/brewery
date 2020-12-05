@@ -9,8 +9,7 @@ type OBDB struct {
 	APIUrl string
 }
 
-
-func (s *OBDB) RequestImplResponse(method string, url string) (*http.Response, error) {
+func (s *OBDB) RESTReq(method string, url string) (*http.Response, error) {
 	var client = &http.Client{
 		Timeout: time.Second * 120,
 	}
